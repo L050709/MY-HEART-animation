@@ -1,0 +1,206 @@
+#include <graphics.h>
+#include <conio.h>
+#include <time.h>
+#include <math.h>
+#include <stdlib.h>
+
+// 屏幕尺寸
+const int xScreen = 1200;
+const int yScreen = 800;
+
+// 数学常数
+const double PI = 3.1415926535;
+const double e = 2.71828;
+
+// 粒子参数
+const double average_distance = 0.162;
+#define quantity 506
+#define circles 210
+#define frames 20
+
+// 颜色数组
+COLORREF colors[7] = {
+    RGB(255,105,180),  //热粉
+    RGB(218,112,214),  //紫红
+    RGB(255,182,193),  //浅粉
+    RGB(238,130,238), //紫罗兰
+    RGB(255,20,147),  //深粉
+    RGB(199,21,133), //中紫罗兰
+    RGB(255,160,122)  //浅珊瑚
+};
+
+// 粒子结构体
+typedef struct {
+    double x, y;
+    COLORREF color;
+} Particle;
+
+// 全局变量（全局变量在静态存储区，不占用栈内存）
+Particle origin_particles[quantity];
+Particle particles[circles * quantity];
+IMAGE images[frames];
+
+// 坐标系转换
+int screen_x(double x) {
+    return (int)(x + xScreen / 2);
+}
+
+int screen_y(double y) {
+    return (int)(-y + yScreen / 2);
+}
+
+// 生成随机数
+int create_random(int min, int max) {
+    if (max > min)
+        return rand() % (max - min + 1) + min;
+    return min;
+}
+
+// 计算距离
+double calculate_distance(double x1, double y1, double x2, double y2) {
+    return sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
+}
+
+// 生成心形基础点
+void generate_heart_shape() {
+    int index = 0;
+    double last_x = 0, last_y = 0;
+
+    for (double radian = 0.1; radian <= 2 * PI && index < quantity; radian += 0.005) {
+        double x = 16 * pow(sin(radian), 3);
+        double y = 13 * cos(radian) - 5 * cos(2 * radian) - 2 * cos(3 * radian) - cos(4 * radian);
+
+        double dist = calculate_distance(last_x, last_y, x, y);
+        if (dist > average_distance) {
+            origin_particles[index].x = x;
+            origin_particles[index].y = y;
+            origin_particles[index].color = colors[0];
+            index++;
+            last_x = x;
+            last_y = y;
+        }
+    }
+}
+
+// 生成扩散粒子
+void generate_particles() {
+    int particle_count = 0;
+
+    for (double size = 0.1; size <= 20 && particle_count < circles * quantity; size += 0.1) {
+        double lightness = 1.4 - (size - 0.1) * 0.0025;
+        if (lightness < 1.0) lightness = 1.0;
+
+        double success_p = 1.0 / (1.0 + pow(e, 8 - size / 2));
+
+        for (int i = 0; i < quantity && particle_count < circles * quantity; i++) {
+            if ((double)rand() / RAND_MAX < success_p) {
+                COLORREF base_color = colors[create_random(0, 6)];
+                particles[particle_count].color = RGB(
+                    (int)(GetRValue(base_color) / lightness),
+                    (int)(GetGValue(base_color) / lightness),
+                    (int)(GetBValue(base_color) / lightness)
+                );
+                particles[particle_count].x = size * origin_particles[i].x + create_random(-4, 4);
+                particles[particle_count].y = size * origin_particles[i].y + create_random(-4, 4);
+                particle_count++;
+            }
+        }
+    }
+}
+
+// 创建动画帧
+void create_animation_frames() {
+    // 关键修改：将大数组从栈内存（静态分配）改为堆内存（动态分配）
+    Particle* initial_particles = new Particle[circles * quantity];  // 堆上分配
+    int particle_count = 0;
+
+    // 计算实际粒子数量
+    for (particle_count = 0; particle_count < circles * quantity; particle_count++) {
+        if (particles[particle_count].x == 0 && particles[particle_count].y == 0)
+            break;
+        initial_particles[particle_count] = particles[particle_count];
+    }
+
+    for (int frame = 0; frame < frames; frame++) {
+        // 创建图像
+        images[frame] = IMAGE(xScreen, yScreen);
+        SetWorkingImage(&images[frame]);
+
+        // 设置黑色背景
+        setbkcolor(BLACK);
+        cleardevice();
+
+        // 绘制主粒子
+        for (int i = 0; i < particle_count; i++) {
+            double x0 = initial_particles[i].x;
+            double y0 = initial_particles[i].y;
+            double distance0 = sqrt(x0 * x0 + y0 * y0);
+
+            double total_distance = -0.0009 * distance0 * distance0 + 0.35714 * distance0 + 5;
+            double current_progress = (double)frame / frames;
+            double current_distance = total_distance * current_progress;
+
+            double new_x = x0 + current_distance * x0 / distance0;
+            double new_y = y0 + current_distance * y0 / distance0;
+
+            setfillcolor(particles[i].color);
+            solidcircle(screen_x(new_x), screen_y(new_y), 1);
+        }
+
+        // 绘制闪烁粒子
+        for (int i = 0; i < quantity; i++) {
+            for (double size = 17; size < 23; size += 0.3) {
+                double probability = (size >= 20) ? 0.6 : 0.95;
+
+                if ((double)rand() / RAND_MAX > probability) {
+                    double x, y;
+                    if (size >= 20) {
+                        x = origin_particles[i].x * size + create_random(-frame * frame / 5 - 15, frame * frame / 5 + 15);
+                        y = origin_particles[i].y * size + create_random(-frame * frame / 5 - 15, frame * frame / 5 + 15);
+                    }
+                    else {
+                        x = origin_particles[i].x * size + create_random(-5, 5);
+                        y = origin_particles[i].y * size + create_random(-5, 5);
+                    }
+                    setfillcolor(colors[create_random(0, 6)]);
+                    solidcircle(screen_x(x), screen_y(y), 1);
+                }
+            }
+        }
+    }
+
+    SetWorkingImage(NULL);
+    delete[] initial_particles;  // 释放堆内存，避免泄漏
+}
+
+// 主函数
+int main() {
+    // 初始化图形窗口
+    initgraph(xScreen, yScreen);
+    BeginBatchDraw();
+    srand((unsigned int)time(NULL));
+
+    // 生成数据
+    generate_heart_shape();
+    generate_particles();
+    create_animation_frames();
+
+    // 动画循环
+    int frame = 0;
+    int direction = 1;  // 1表示正向，-1表示反向
+
+    while (!_kbhit()) {
+        putimage(0, 0, &images[frame]);
+        FlushBatchDraw();
+        Sleep(50);
+
+        frame += direction;
+        if (frame >= frames - 1 || frame <= 0) {
+            direction = -direction;
+        }
+    }
+
+    EndBatchDraw();
+    closegraph();
+    return 0;
+}
